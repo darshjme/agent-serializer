@@ -4,20 +4,15 @@
 
 # agent-serializer
 
-**Serialization for agent data for LLM agents. Zero external dependencies.**
+**Production-grade serialization and deserialization for agent data**
 
-[![PyPI](https://img.shields.io/pypi/v/agent-serializer?color=blue)](https://pypi.org/project/agent-serializer/)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://python.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Zero deps](https://img.shields.io/badge/dependencies-zero-brightgreen)](pyproject.toml)
+[![PyPI version](https://img.shields.io/pypi/v/agent-serializer?color=yellow&style=flat-square)](https://pypi.org/project/agent-serializer/) [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square)](https://python.org) [![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE) [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](#)
 
 ---
 
 ## The Problem
 
-Production LLM agents fail silently. Without serialization for agent data, you get undefined behaviour at scale — race conditions, lost state, cascading failures, and no way to debug what went wrong.
-
-`agent-serializer` gives you a production-ready serialization for agent data primitive with a clean API, tested edge cases, and zero configuration.
+Without a shared serializer, agent messages use ad-hoc JSON that breaks on floats, datetimes, and nested objects. Version mismatches between sender and receiver produce silent data corruption that only surfaces in production.
 
 ## Installation
 
@@ -25,88 +20,84 @@ Production LLM agents fail silently. Without serialization for agent data, you g
 pip install agent-serializer
 ```
 
-Or from source:
-
-```bash
-git clone https://github.com/darshjme/agent-serializer.git
-cd agent-serializer
-pip install -e .
-```
-
 ## Quick Start
 
 ```python
-from agent_serializer import *  # see API reference below
+from agent_serializer import BinarySerializer, _AgentEncoder
 
-# See examples/ directory for complete working examples
+# Initialise
+instance = BinarySerializer(name="my_agent")
+
+# Use
+# see API reference below
+print(result)
 ```
 
 ## API Reference
 
-The main classes and functions are defined in `agent_serializer/__init__.py`.
+### `BinarySerializer`
 
-Key exports: `datetime/Enum/dataclass · TypedSerializer · gzip BinarySerializer`
+```python
+class BinarySerializer(Serializer):
+    """MessagePack-style binary serializer using ``json`` + ``gzip``.
+    def pack(self, obj: Any) -> bytes:
+        """Serialize *obj* to compressed bytes."""
+    def unpack(self, data: bytes) -> Any:
+        """Decompress and deserialize *data* back to Python objects."""
+    def size_reduction(self, obj: Any) -> float:
+        """Return the compression ratio as a fraction (0–1).
+```
 
-All classes follow a consistent interface:
-- Instantiate with sensible defaults
-- Compose with other arsenal libraries
-- Zero external dependencies required
+### `_AgentEncoder`
 
-See the source code and `tests/` directory for verified usage examples.
+```python
+class _AgentEncoder(json.JSONEncoder):
+    """JSON encoder that handles agent-specific types."""
+    def __init__(self, *args, registry: dict | None = None, **kwargs):
+    def default(self, obj: Any) -> Any:  # noqa: ANN401
+def _decode_hook(registry: dict, obj: dict) -> Any:  # noqa: ANN401
+        """Object hook for J
+```
+
 
 ## How It Works
 
+### Flow
+
 ```mermaid
 flowchart LR
-    A[Agent Task] --> B[agent-serializer]
-    B --> C{Decision}
-    C -->|success| D[✅ Result]
-    C -->|failure| E[⚠️ Handle]
-    E --> B
-
-    style B fill:#161b22,stroke:#cc9933,stroke-width:2,color:#cc9933
-    style D fill:#1a3320,stroke:#238636,color:#3fb950
-    style E fill:#3d1a1a,stroke:#f85149,color:#f85149
+    A[User Code] -->|create| B[BinarySerializer]
+    B -->|configure| C[_AgentEncoder]
+    C -->|execute| D{Success?}
+    D -->|yes| E[Return Result]
+    D -->|no| F[Error Handler]
+    F --> G[Fallback / Retry]
+    G --> C
 ```
+
+### Sequence
 
 ```mermaid
 sequenceDiagram
-    participant Agent
-    participant AgentSerializer as agent-serializer
-    participant Output
+    participant App
+    participant BinarySerializer
+    participant _AgentEncoder
 
-    Agent->>AgentSerializer: initialize()
-    AgentSerializer-->>Agent: ready
-
-    loop Agent Run
-        Agent->>AgentSerializer: process(input)
-        AgentSerializer-->>Agent: result
-    end
-
-    Agent->>Output: deliver(result)
+    App->>+BinarySerializer: initialise()
+    BinarySerializer->>+_AgentEncoder: configure()
+    _AgentEncoder-->>-BinarySerializer: ready
+    App->>+BinarySerializer: run(context)
+    BinarySerializer->>+_AgentEncoder: execute(context)
+    _AgentEncoder-->>-BinarySerializer: result
+    BinarySerializer-->>-App: WorkflowResult
 ```
 
 ## Philosophy
 
-The grantha script preserved Sanskrit across centuries without data loss. agent-serializer is that fidelity for agent data.
+> Brahman is ineffable, yet the Vedas serialized the cosmos into *rk, saman, yajus* — structure enables transmission.
 
 ---
 
-## Part of the Arsenal
-
-`agent-serializer` is one of six production libraries for LLM agents:
-
-| Library | Purpose |
-|---------|---------|
-| [herald](https://github.com/darshjme/herald) | Semantic task routing |
-| [engram](https://github.com/darshjme/engram) | Agent memory |
-| [sentinel](https://github.com/darshjme/sentinel) | ReAct loop guards |
-| [verdict](https://github.com/darshjme/verdict) | Agent evaluation |
-| [agent-guardrails](https://github.com/darshjme/agent-guardrails) | Output validation |
-| [agent-observability](https://github.com/darshjme/agent-observability) | Tracing & metrics |
-
-→ [arsenal](https://github.com/darshjme/arsenal) — the complete stack
-
----
+*Part of the [arsenal](https://github.com/darshjme/arsenal) — production stack for LLM agents.*
 
 *Built by [Darshankumar Joshi](https://github.com/darshjme), Gujarat, India.*
