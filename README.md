@@ -1,12 +1,23 @@
+<div align="center">
+<img src="assets/hero.svg" width="100%"/>
+</div>
+
 # agent-serializer
 
-> Production-grade serialization and deserialization for agent data — zero external dependencies.
+**Serialization for agent data for LLM agents. Zero external dependencies.**
 
-Agents pass complex data between steps: tool results, structured outputs, intermediate states.
-Without consistent serialization you get encoding errors, type loss (`datetime` → `str`), and
-data corruption across boundaries. **agent-serializer** fixes that.
+[![PyPI](https://img.shields.io/pypi/v/agent-serializer?color=blue)](https://pypi.org/project/agent-serializer/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://python.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Zero deps](https://img.shields.io/badge/dependencies-zero-brightgreen)](pyproject.toml)
 
 ---
+
+## The Problem
+
+Production LLM agents fail silently. Without serialization for agent data, you get undefined behaviour at scale — race conditions, lost state, cascading failures, and no way to debug what went wrong.
+
+`agent-serializer` gives you a production-ready serialization for agent data primitive with a clean API, tested edge cases, and zero configuration.
 
 ## Installation
 
@@ -14,156 +25,88 @@ data corruption across boundaries. **agent-serializer** fixes that.
 pip install agent-serializer
 ```
 
-Requires **Python ≥ 3.10**. Zero runtime dependencies (stdlib only: `json`, `gzip`, `dataclasses`).
+Or from source:
 
----
-
-## Quick Start — Agent Data Serialization
-
-```python
-import dataclasses
-from datetime import datetime
-from enum import Enum
-
-from agent_serializer import Serializer, TypedSerializer, BinarySerializer, serialized
-
-# ── 1. Base Serializer ────────────────────────────────────────────────────────
-
-s = Serializer()
-
-# Handles datetime, Enum, dataclass, set, bytes out of the box
-payload = {
-    "timestamp": datetime(2025, 6, 1, 12, 0),
-    "tags": {"urgent", "llm"},
-    "score": 0.97,
-}
-
-json_str = s.dumps(payload)
-restored = s.loads(json_str)
-
-assert isinstance(restored["timestamp"], datetime)  # ✓ type preserved
-assert isinstance(restored["tags"], set)            # ✓ set preserved
-
-# ── 2. Custom type registration ───────────────────────────────────────────────
-
-class Vector:
-    def __init__(self, values: list[float]):
-        self.values = values
-
-s.register(
-    Vector,
-    encoder=lambda v: v.values,
-    decoder=lambda d: Vector(d),
-)
-
-vec = Vector([0.1, 0.2, 0.9])
-result = s.loads(s.dumps(vec))
-assert result.values == [0.1, 0.2, 0.9]
-
-# ── 3. TypedSerializer — schema validation ────────────────────────────────────
-
-@dataclasses.dataclass
-class ToolResult:
-    name: str
-    output: str
-    score: float = 0.0
-
-ts = TypedSerializer(ToolResult)
-
-data = ToolResult(name="web_search", output="The capital of France is Paris.", score=0.99)
-raw = ts.dumps(data)
-result = ts.loads(raw)  # returns a ToolResult instance, validated
-
-assert isinstance(result, ToolResult)
-assert ts.validate({"name": "x", "output": "y"})       # ✓
-assert not ts.validate({"output": "missing name field"})  # ✗
-
-# ── 4. BinarySerializer — compact binary format ───────────────────────────────
-
-bs = BinarySerializer()
-
-large_state = {"history": ["step"] * 1000, "ts": datetime.now()}
-packed = bs.pack(large_state)          # bytes via json + gzip
-unpacked = bs.unpack(packed)           # fully restored, types intact
-
-ratio = bs.size_reduction(large_state)
-print(f"Compressed {ratio:.0%} smaller than raw JSON")
-
-# ── 5. @serialized decorator ──────────────────────────────────────────────────
-
-class Status(Enum):
-    DONE = "done"
-    PENDING = "pending"
-
-@serialized(s)
-def agent_step(tool_result: dict) -> dict:
-    """Agent step — args decoded, return value encoded automatically."""
-    return {
-        "status": Status.DONE,
-        "processed_at": datetime.now(),
-        "result": tool_result,
-    }
-
-output = agent_step({"score": 0.8})
-# Return value is a clean Python dict with proper types
-assert isinstance(output["processed_at"], datetime)
-assert output["status"] == Status.DONE
+```bash
+git clone https://github.com/darshjme/agent-serializer.git
+cd agent-serializer
+pip install -e .
 ```
 
----
+## Quick Start
+
+```python
+from agent_serializer import *  # see API reference below
+
+# See examples/ directory for complete working examples
+```
 
 ## API Reference
 
-### `Serializer`
+The main classes and functions are defined in `agent_serializer/__init__.py`.
 
-| Method | Signature | Description |
-|---|---|---|
-| `dumps` | `(obj: any) → str` | Serialize to JSON string |
-| `loads` | `(data: str) → any` | Deserialize from JSON string |
-| `encode` | `(obj: any) → dict` | Encode to dict (embed in larger structures) |
-| `register` | `(type_, encoder, decoder)` | Register custom type |
+Key exports: `datetime/Enum/dataclass · TypedSerializer · gzip BinarySerializer`
 
-### `TypedSerializer(schema)`
+All classes follow a consistent interface:
+- Instantiate with sensible defaults
+- Compose with other arsenal libraries
+- Zero external dependencies required
 
-Inherits `Serializer`. Adds:
+See the source code and `tests/` directory for verified usage examples.
 
-| Method | Description |
-|---|---|
-| `loads(data)` | Deserialize + coerce to schema type |
-| `validate(data)` | Validate dict against schema |
+## How It Works
 
-### `BinarySerializer`
+```mermaid
+flowchart LR
+    A[Agent Task] --> B[agent-serializer]
+    B --> C{Decision}
+    C -->|success| D[✅ Result]
+    C -->|failure| E[⚠️ Handle]
+    E --> B
 
-Inherits `Serializer`. Adds:
+    style B fill:#161b22,stroke:#cc9933,stroke-width:2,color:#cc9933
+    style D fill:#1a3320,stroke:#238636,color:#3fb950
+    style E fill:#3d1a1a,stroke:#f85149,color:#f85149
+```
 
-| Method | Description |
-|---|---|
-| `pack(obj)` | Serialize to compressed bytes |
-| `unpack(data)` | Decompress + deserialize |
-| `size_reduction(obj)` | Compression ratio vs raw JSON (0–1) |
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant AgentSerializer as agent-serializer
+    participant Output
 
-### `@serialized(serializer)`
+    Agent->>AgentSerializer: initialize()
+    AgentSerializer-->>Agent: ready
 
-Decorator. Wraps a function so that:
-- Incoming `dict` arguments are decoded (type tokens resolved)
-- Return value is round-tripped (type-safe output every time)
+    loop Agent Run
+        Agent->>AgentSerializer: process(input)
+        AgentSerializer-->>Agent: result
+    end
+
+    Agent->>Output: deliver(result)
+```
+
+## Philosophy
+
+The grantha script preserved Sanskrit across centuries without data loss. agent-serializer is that fidelity for agent data.
 
 ---
 
-## Supported Types (Built-in)
+## Part of the Arsenal
 
-| Type | Preserved |
-|---|---|
-| `datetime` / `date` / `time` | ✓ |
-| `Enum` subclasses | ✓ |
-| `@dataclass` instances | ✓ |
-| `set` / `frozenset` | ✓ |
-| `bytes` | ✓ |
-| Any JSON-native type | ✓ |
-| Custom types via `register()` | ✓ |
+`agent-serializer` is one of six production libraries for LLM agents:
+
+| Library | Purpose |
+|---------|---------|
+| [herald](https://github.com/darshjme/herald) | Semantic task routing |
+| [engram](https://github.com/darshjme/engram) | Agent memory |
+| [sentinel](https://github.com/darshjme/sentinel) | ReAct loop guards |
+| [verdict](https://github.com/darshjme/verdict) | Agent evaluation |
+| [agent-guardrails](https://github.com/darshjme/agent-guardrails) | Output validation |
+| [agent-observability](https://github.com/darshjme/agent-observability) | Tracing & metrics |
+
+→ [arsenal](https://github.com/darshjme/arsenal) — the complete stack
 
 ---
 
-## License
-
-MIT
+*Built by [Darshankumar Joshi](https://github.com/darshjme), Gujarat, India.*
